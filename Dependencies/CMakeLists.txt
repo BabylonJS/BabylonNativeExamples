@@ -1,0 +1,8 @@
+set(BABYLON_NATIVE_BUILD_APPS OFF)
+#set(NAPI_JAVASCRIPT_ENGINE V8)
+add_subdirectory(BabylonNative)
+
+set(BUILD_TOOLS OFF)
+set(BUILD_XAUDIO_WIN8 OFF)
+set(DIRECTX_ARCH ${CMAKE_VS_PLATFORM_NAME})
+add_subdirectory(DirectXTK)
