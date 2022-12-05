@@ -69,6 +69,8 @@ namespace
 
 int main()
 {
+    RenderDoc::Init();
+
     auto d3dDevice = CreateD3DDevice();
 
     winrt::com_ptr<ID3D11DeviceContext> context;

@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "dependencies": {
-    "babylonjs": "^5.27.0",
-    "babylonjs-loaders": "^5.27.0"
+    "babylonjs": "^5.35.1",
+    "babylonjs-loaders": "^5.35.1"
   }
 }
