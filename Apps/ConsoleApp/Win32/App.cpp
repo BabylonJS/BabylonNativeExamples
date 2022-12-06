@@ -69,35 +69,46 @@ namespace
 
 int main()
 {
+    // Initialize RenderDoc.
     RenderDoc::Init();
 
+    // Create a DirectX device.
     auto d3dDevice = CreateD3DDevice();
 
-    winrt::com_ptr<ID3D11DeviceContext> context;
-    d3dDevice->GetImmediateContext(context.put());
+    // Get the immediate context for DirectXTK when saving the texture.
+    winrt::com_ptr<ID3D11DeviceContext> d3dDeviceContext;
+    d3dDevice->GetImmediateContext(d3dDeviceContext.put());
 
+    // Create the Babylon Native graphics device and update.
     auto device = CreateGraphicsDevice(d3dDevice.get());
     auto deviceUpdate = std::make_unique<Babylon::Graphics::DeviceUpdate>(device->GetUpdate("update"));
 
+    // Start rendering a frame to unblock the JavaScript from queuing graphics
+    // commands.
     device->StartRenderingCurrentFrame();
     deviceUpdate->Start();
 
+    // Create a Babylon Native application runtime which hosts a JavaScript
+    // engine on a new thread.
     auto runtime = std::make_unique<Babylon::AppRuntime>();
     runtime->Dispatch([&device](Napi::Env env)
     {
+        // Add the Babylon Native graphics device to the JavaScript environment.
         device->AddToJavaScript(env);
 
+        // Initialize the console polyfill.
         Babylon::Polyfills::Console::Initialize(env, [](const char* message, auto)
         {
             std::cout << message;
         });
 
+        // Initialize the window, XMLHttpRequest, and NativeEngine polyfills.
         Babylon::Polyfills::Window::Initialize(env);
         Babylon::Polyfills::XMLHttpRequest::Initialize(env);
-
         Babylon::Plugins::NativeEngine::Initialize(env);
     });
 
+    // Load the scripts for Babylon.js core and loaders plus this app's index.js.
     Babylon::ScriptLoader loader{*runtime};
     loader.LoadScript("app:///Scripts/babylon.max.js");
     loader.LoadScript("app:///Scripts/babylonjs.loaders.js");
@@ -109,6 +120,8 @@ int main()
     std::promise<void> addToContext{};
     std::promise<void> startup{};
 
+    // Create an external texture for the render target texture and pass it to
+    // the `startup` JavaScript function.
     loader.Dispatch([externalTexture = Babylon::Plugins::ExternalTexture{outputTexture.get()}, &addToContext, &startup](Napi::Env env)
     {
         auto jsPromise = externalTexture.AddToContextAsync(env);
@@ -130,11 +143,14 @@ int main()
         });
     });
 
+    // Wait for `AddToContextAsync` to be called.
     addToContext.get_future().wait();
 
+    // Render a frame so that `AddToContextAsync` will complete.
     deviceUpdate->Finish();
     device->FinishRenderingCurrentFrame();
 
+    // Wait for `startup` to finish.
     startup.get_future().wait();
 
     struct Asset
@@ -152,20 +168,21 @@ int main()
 
     for (const auto& asset : assets)
     {
+        // Tell RenderDoc to start capturing.
         RenderDoc::StartFrameCapture(d3dDevice.get());
 
+        // Start rendering a frame to unblock the JavaScript again.
         device->StartRenderingCurrentFrame();
         deviceUpdate->Start();
 
         std::promise<void> loadAndRenderAsset{};
 
+        // Call `loadAndRenderAssetAsync` with the asset URL.
         loader.Dispatch([&loadAndRenderAsset, &asset](Napi::Env env)
         {
             std::cout << "Loading " << asset.Name << std::endl;
 
-            auto jsPromise = env.Global().Get("loadAndRenderAssetAsync").As<Napi::Function>().Call(
-            {
-                Napi::String::From(env, asset.Name),
+            auto jsPromise = env.Global().Get("loadAndRenderAssetAsync").As<Napi::Function>().Call({
                 Napi::String::From(env, asset.Url)
             }).As<Napi::Promise>();
 
@@ -178,21 +195,26 @@ int main()
             });
         });
 
+        // Wait for the function to complete.
         loadAndRenderAsset.get_future().wait();
 
+        // Finish rendering the frame.
         deviceUpdate->Finish();
         device->FinishRenderingCurrentFrame();
 
+        // Tell RenderDoc to stop capturing.
         RenderDoc::StopFrameCapture(d3dDevice.get());
 
+        // Save the texture into an PNG next to the executable.
         auto filePath = GetModulePath() / asset.Name;
         filePath.concat(".png");
         std::cout << "Writing " << filePath.string() << std::endl;
 
         // See https://github.com/Microsoft/DirectXTK/wiki/ScreenGrab#srgb-vs-linear-color-space
-        winrt::check_hresult(DirectX::SaveWICTextureToFile(context.get(), outputTexture.get(), GUID_ContainerFormatPng, filePath.c_str(), nullptr, nullptr, true));
+        winrt::check_hresult(DirectX::SaveWICTextureToFile(d3dDeviceContext.get(), outputTexture.get(), GUID_ContainerFormatPng, filePath.c_str(), nullptr, nullptr, true));
     }
 
+    // Reset the application runtime, then graphics device update, then graphics device, in that order.
     runtime.reset();
     deviceUpdate.reset();
     device.reset();
