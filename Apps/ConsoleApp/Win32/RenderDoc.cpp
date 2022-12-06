@@ -1,5 +1,6 @@
 #include "RenderDoc.h"
 #include <Windows.h>
+#include <cassert>
 
 #ifdef RENDERDOC
 
