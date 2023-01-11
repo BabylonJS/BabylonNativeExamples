@@ -6,6 +6,9 @@ set(SCRIPTS
 set(SOURCES
     "Win32/RenderDoc.h"
     "Win32/RenderDoc.cpp"
+    "Win32/SystemTime.h"
+    "Win32/SystemTime.cpp"
+    "Win32/Utility.h"
     "Win32/App.cpp")
 
 add_executable(ConsoleApp ${SCRIPTS} ${SOURCES})

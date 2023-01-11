@@ -17,11 +17,29 @@
 #include <iostream>
 
 #include "RenderDoc.h"
+#include "SystemTime.h"
+
+#include <winrt/Windows.AI.MachineLearning.h>
+#include <winrt/Windows.Foundation.Collections.h>
+#include <winrt/Windows.Graphics.Imaging.h>
+#include <winrt/Windows.Media.h>
+#include <winrt/Windows.Storage.h>
+#include <Windows.graphics.directx.direct3d11.interop.h>
+
+using namespace winrt::Windows::AI::MachineLearning;
+using namespace winrt::Windows::Foundation::Collections;
+using namespace winrt::Windows::Graphics::Imaging;
+using namespace winrt::Windows::Media;
+using namespace winrt::Windows::Storage;
 
 namespace
 {
-    constexpr const uint32_t WIDTH = 1024;
-    constexpr const uint32_t HEIGHT = 1024;
+    // Global variables  
+    constexpr const uint32_t WIDTH = 720;
+    constexpr const uint32_t HEIGHT = 720;
+
+    LearningModelSession session = nullptr;
+    LearningModelBinding binding = nullptr;
 
     std::filesystem::path GetModulePath()
     {
@@ -46,11 +64,11 @@ namespace
         desc.Height = HEIGHT;
         desc.MipLevels = 1;
         desc.ArraySize = 1;
-        desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
         desc.SampleDesc = {1, 0};
         desc.Usage = D3D11_USAGE_DEFAULT;
         desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
-        desc.CPUAccessFlags = 0;
+        desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
         desc.MiscFlags = 0;
 
         winrt::com_ptr<ID3D11Texture2D> texture;
@@ -65,10 +83,114 @@ namespace
         device->UpdateSize(WIDTH, HEIGHT);
         return device;
     }
+
+    // Machine learning 
+    LearningModel LoadModel(winrt::hstring  modelPath)
+    {
+        // load the model
+        printf( "Loading modelfile '%ws'\n", modelPath.c_str());
+        auto ticks = SystemTime::GetCurrentTick();
+        auto model = LearningModel::LoadFromFilePath(modelPath);
+        ticks = SystemTime::GetCurrentTick() - ticks;
+        printf( "model file loaded in %f ms\n", SystemTime::TicksToMillisecs(ticks));
+
+        // Debugging logic to see the input and output of ther model and retrieve dimensions of input/output variables
+        // ### DEBUG ###
+        static std::vector<std::string> kind_values { "Tensor", "Sequence", "Map", "Image" };
+
+        static std::map<int, std::string> channel_values {
+            {0,   "Unknown"},
+            {12,  "Rgba16"},
+            {30,  "Rgba8"},
+            {57,  "Gray16"},
+            {62,  "Gray8"},
+            {87,  "Bgra8"},
+            {103, "Nv12"},
+            {104, "P010"},
+            {107, "Yuy2"}
+        };
+
+        for( auto inputF : model.InputFeatures() )
+        {
+            auto kind = static_cast< int >(inputF.Kind());
+            auto name = inputF.Name();
+
+            printf( "input | kind:'%s', name:'%ws' \n", kind_values[ kind ].c_str(), name.c_str() );
+
+            IImageFeatureDescriptor imgDesc = inputF.try_as<IImageFeatureDescriptor>();
+            ITensorFeatureDescriptor tfDesc = inputF.try_as<ITensorFeatureDescriptor>();
+
+            auto n = ( int ) ( imgDesc == nullptr ? tfDesc.Shape().GetAt( 0 ) : 1 );
+            auto width = ( int ) ( imgDesc == nullptr ? tfDesc.Shape().GetAt( 3 ) : imgDesc.Width() );
+            auto height = ( int ) ( imgDesc == nullptr ? tfDesc.Shape().GetAt( 2 ) : imgDesc.Height() );
+            auto channel = ( imgDesc == nullptr ? tfDesc.Shape().GetAt( 1 ) : static_cast< int >( imgDesc.BitmapPixelFormat() ) );
+
+            printf( "N: %i, Width:%i, Height:%i, Channel: '%s' \n", n, width, height, channel_values[ channel ].c_str() );
+        }
+
+        for( auto outputF : model.OutputFeatures() )
+        {
+            auto kind = static_cast< int >( outputF.Kind() );
+            auto name = outputF.Name();
+
+            printf( "output | kind:'%s', name:'%ws' \n", kind_values[ kind ].c_str(), name.c_str() );
+
+            IImageFeatureDescriptor imgDesc = outputF.try_as<IImageFeatureDescriptor>();
+            ITensorFeatureDescriptor tfDesc = outputF.try_as<ITensorFeatureDescriptor>();
+
+            auto n = ( int ) ( imgDesc == nullptr ? tfDesc.Shape().GetAt( 0 ) : 1 );
+            auto width = ( int ) ( imgDesc == nullptr ? tfDesc.Shape().GetAt( 3 ) : imgDesc.Width() );
+            auto height = ( int ) ( imgDesc == nullptr ? tfDesc.Shape().GetAt( 2 ) : imgDesc.Height() );
+            auto channel = ( imgDesc == nullptr ? tfDesc.Shape().GetAt( 1 ) : static_cast< int >( imgDesc.BitmapPixelFormat() ) );
+
+            printf( "N: %i, Width:%i, Height:%i, Channel: '%s' \n", n, width, height, channel_values[ channel ].c_str() );
+        }
+
+        return model;
+    }
+
+    LearningModelSession CreateModelSession(LearningModel model)
+    {
+        auto session = LearningModelSession { model, LearningModelDevice(LearningModelDeviceKind::DirectX) };
+        return session;
+    }
+
+    LearningModelBinding BindModel(LearningModelSession session, VideoFrame inputFrame, VideoFrame outputFrame )
+    {
+        printf( "Binding the model...\n" );
+        auto ticks = SystemTime::GetCurrentTick();
+
+        // now create a session and binding
+        binding = LearningModelBinding { session };       
+
+        binding.Bind( L"outputImage", outputFrame );
+
+        ticks = SystemTime::GetCurrentTick() - ticks;
+        printf( "Model bound in %f ms\n", SystemTime::TicksToMillisecs(ticks) );
+
+        return binding;
+    }
+
+    VideoFrame RunModel(LearningModelSession session, LearningModelBinding binding, VideoFrame inputFrame, VideoFrame outputFrame )
+    {
+        // now run the model
+        printf("Running the model...\n" );
+        auto ticks = SystemTime::GetCurrentTick();
+        // bind the intput image
+        binding.Bind( L"inputImage", inputFrame);
+
+        auto results = session.Evaluate(binding, L"RunId");
+        ticks = SystemTime::GetCurrentTick() - ticks;
+        printf("model run took %f ms\n", SystemTime::TicksToMillisecs(ticks));
+        VideoFrame evalOutput = results.Outputs().Lookup(L"outputImage").try_as<VideoFrame>();
+        return evalOutput;
+    }
 }
 
 int main()
 {
+    SystemTime::Initialize();
+
     // Initialize RenderDoc.
     RenderDoc::Init();
 
@@ -83,6 +205,19 @@ int main()
     auto device = CreateGraphicsDevice(d3dDevice.get());
     auto deviceUpdate = std::make_unique<Babylon::Graphics::DeviceUpdate>(device->GetUpdate("update"));
 
+    winrt::hstring modelPath = L"D:\\Github\\Windows-Machine-Learning\\SharedContent\\models\\candy.onnx";
+
+    //Machien Learning initalization
+    LearningModel model = LoadModel(modelPath);
+    auto session = CreateModelSession(model);
+
+    VideoFrame::CreateAsDirect3D11SurfaceBacked(winrt::Windows::Graphics::DirectX::DirectXPixelFormat::B8G8R8A8Typeless, WIDTH, HEIGHT);
+
+    auto outputFrame = VideoFrame(winrt::Windows::Graphics::Imaging::BitmapPixelFormat::Bgra8, WIDTH, HEIGHT);
+    auto inputFrame = VideoFrame(winrt::Windows::Graphics::Imaging::BitmapPixelFormat::Bgra8, WIDTH, HEIGHT);
+
+    auto binding = BindModel(session, inputFrame, outputFrame);
+
     // Start rendering a frame to unblock the JavaScript from queuing graphics
     // commands.
     device->StartRenderingCurrentFrame();
@@ -91,6 +226,7 @@ int main()
     // Create a Babylon Native application runtime which hosts a JavaScript
     // engine on a new thread.
     auto runtime = std::make_unique<Babylon::AppRuntime>();
+
     runtime->Dispatch([&device](Napi::Env env)
     {
         // Add the Babylon Native graphics device to the JavaScript environment.
@@ -208,10 +344,33 @@ int main()
         // Save the texture into an PNG next to the executable.
         auto filePath = GetModulePath() / asset.Name;
         filePath.concat(".png");
-        std::cout << "Writing " << filePath.string() << std::endl;
+        std::cout << "Writing original to: " << filePath.string() << std::endl;
+
+        auto modifiedFilePath = GetModulePath() / asset.Name;
+        modifiedFilePath.concat("_styled").concat(".png");
+        std::cout << "Writing styled to: " << modifiedFilePath.string() << std::endl;
 
         // See https://github.com/Microsoft/DirectXTK/wiki/ScreenGrab#srgb-vs-linear-color-space
-        winrt::check_hresult(DirectX::SaveWICTextureToFile(d3dDeviceContext.get(), outputTexture.get(), GUID_ContainerFormatPng, filePath.c_str(), nullptr, nullptr, true));
+        winrt::check_hresult(DirectX::SaveWICTextureToFile( d3dDeviceContext.get(), outputTexture.get(), GUID_ContainerFormatPng, filePath.c_str(), nullptr, nullptr, true ) );
+
+        //Filter applyed
+        IDXGISurface* surface = nullptr;
+        winrt::check_hresult(outputTexture->QueryInterface(__uuidof( IDXGISurface ), (void**) &surface));
+
+        winrt::Windows::Graphics::DirectX::Direct3D11::IDirect3DSurface d3dSurface2 {nullptr};
+
+        winrt::check_hresult(CreateDirect3D11SurfaceFromDXGISurface(surface, reinterpret_cast<::IInspectable**>(winrt::put_abi(d3dSurface2))));
+
+        auto videoFrame = VideoFrame::CreateWithDirect3D11Surface(d3dSurface2);
+
+        videoFrame.CopyToAsync(inputFrame).get();
+
+        auto result = RunModel(session, binding, inputFrame, outputFrame);
+
+        result.CopyToAsync(videoFrame).get();
+
+        // See https://github.com/Microsoft/DirectXTK/wiki/ScreenGrab#srgb-vs-linear-color-space
+        winrt::check_hresult(DirectX::SaveWICTextureToFile(d3dDeviceContext.get(), outputTexture.get(), GUID_ContainerFormatPng, modifiedFilePath.c_str(), nullptr, nullptr, true));
     }
 
     // Reset the application runtime, then graphics device update, then graphics device, in that order.
