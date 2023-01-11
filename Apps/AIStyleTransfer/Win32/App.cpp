@@ -75,7 +75,8 @@ namespace
     ComPtr<IDXGISwapChain1>	        g_SwapChain = nullptr;
     ComPtr<ID3D11Device>			g_d3dDevice = nullptr;
     ComPtr<ID3D11DeviceContext>		g_d3dImmediateContext = nullptr;
-    Microsoft::WRL::ComPtr<ID3D11Texture2D> g_renderTexture = nullptr;
+    ComPtr<ID3D11Texture2D>         g_renderTexture = nullptr;
+    VideoFrame                      g_renderVideoFrame = nullptr;
 
     std::filesystem::path GetModulePath()
     {
@@ -141,6 +142,12 @@ namespace
         ASSERT_SUCCEEDED(g_SwapChain->GetBuffer(0, __uuidof( IDXGISurface1), &dxgiBuffer));
 
         ASSERT_SUCCEEDED(dxgiBuffer->QueryInterface(__uuidof(ID3D11Texture2D), (void**) &g_renderTexture));
+
+        winrt::Windows::Graphics::DirectX::Direct3D11::IDirect3DSurface d3dSurface2 = nullptr;
+
+        winrt::check_hresult( CreateDirect3D11SurfaceFromDXGISurface(dxgiBuffer.Get(), reinterpret_cast<::IInspectable**>(winrt::put_abi(d3dSurface2))));
+    
+        g_renderVideoFrame = VideoFrame::CreateWithDirect3D11Surface(d3dSurface2);
     }
 
     std::unique_ptr<Babylon::Graphics::Device> CreateGraphicsDevice(ID3D11Device* d3dDevice)
@@ -327,7 +334,7 @@ int APIENTRY wWinMain( _In_ HINSTANCE hInstance,
     device = CreateGraphicsDevice(g_d3dDevice.Get());
     update = std::make_unique<Babylon::Graphics::DeviceUpdate>(device->GetUpdate("update"));
 
-    winrt::hstring modelPath = L"D:\\Github\\Windows-Machine-Learning\\SharedContent\\models\\mosaic.onnx";
+    winrt::hstring modelPath = L"D:\\Github\\Windows-Machine-Learning\\SharedContent\\models\\candy.onnx";
 
     //Machien Learning initalization
     LearningModel model = LoadModel(modelPath);
@@ -436,25 +443,19 @@ int APIENTRY wWinMain( _In_ HINSTANCE hInstance,
                 device->FinishRenderingCurrentFrame();
 
 #ifdef USE_STYLE_TRANSFER
-                //Filter applyed
-                IDXGISurface* surface = nullptr;
-                winrt::check_hresult( g_renderTexture->QueryInterface( __uuidof( IDXGISurface ), ( void** ) &surface ) );
-                winrt::Windows::Graphics::DirectX::Direct3D11::IDirect3DSurface d3dSurface2 { nullptr };
+                
+                auto copyTask = g_renderVideoFrame.CopyToAsync(inputFrame);
 
-                winrt::check_hresult( CreateDirect3D11SurfaceFromDXGISurface( surface, reinterpret_cast< ::IInspectable** >( winrt::put_abi( d3dSurface2 ) ) ) );
-
-                auto videoFrame = VideoFrame::CreateWithDirect3D11Surface( d3dSurface2 );
-                auto copyTask = videoFrame.CopyToAsync( inputFrame );
-
-                while( copyTask.Status() != winrt::Windows::Foundation::AsyncStatus::Completed )
+                while( copyTask.Status() != winrt::Windows::Foundation::AsyncStatus::Completed)
                 {
                     continue;
                 }
 
-                auto result = RunModel( session, binding, inputFrame );
-                copyTask = result.CopyToAsync( videoFrame );
+                auto result = RunModel( session, binding, inputFrame);
 
-                while( copyTask.Status() != winrt::Windows::Foundation::AsyncStatus::Completed )
+                copyTask = result.CopyToAsync(g_renderVideoFrame);
+
+                while( copyTask.Status() != winrt::Windows::Foundation::AsyncStatus::Completed)
                 {
                     continue;
                 }
