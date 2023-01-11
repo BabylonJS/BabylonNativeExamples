@@ -151,7 +151,7 @@ namespace
 
     LearningModelSession CreateModelSession(LearningModel model)
     {
-        auto session = LearningModelSession { model, LearningModelDevice(LearningModelDeviceKind::DirectX) };
+        auto session = LearningModelSession { model, LearningModelDevice(LearningModelDeviceKind::DirectXHighPerformance) };
         return session;
     }
 
@@ -171,18 +171,19 @@ namespace
         return binding;
     }
 
-    VideoFrame RunModel(LearningModelSession session, LearningModelBinding binding, VideoFrame inputFrame, VideoFrame outputFrame )
+    VideoFrame RunModel(LearningModelSession session, LearningModelBinding binding, VideoFrame inputFrame)
     {
         // now run the model
         printf("Running the model...\n" );
         auto ticks = SystemTime::GetCurrentTick();
         // bind the intput image
-        binding.Bind( L"inputImage", inputFrame);
+        binding.Bind(L"inputImage", inputFrame);
 
-        auto results = session.Evaluate(binding, L"RunId");
-        ticks = SystemTime::GetCurrentTick() - ticks;
-        printf("model run took %f ms\n", SystemTime::TicksToMillisecs(ticks));
+        auto results = session.Evaluate( binding, L"RunId" );
         VideoFrame evalOutput = results.Outputs().Lookup(L"outputImage").try_as<VideoFrame>();
+
+        ticks = SystemTime::GetCurrentTick() - ticks;
+        printf( "model run took %f ms\n", SystemTime::TicksToMillisecs(ticks));
         return evalOutput;
     }
 }
@@ -365,7 +366,7 @@ int main()
 
         videoFrame.CopyToAsync(inputFrame).get();
 
-        auto result = RunModel(session, binding, inputFrame, outputFrame);
+        auto result = RunModel(session, binding, inputFrame);
 
         result.CopyToAsync(videoFrame).get();
 
