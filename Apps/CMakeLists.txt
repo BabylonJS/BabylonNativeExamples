@@ -1,2 +1,2 @@
 add_subdirectory(ConsoleApp)
-add_subdirectory(AIStyleTransfer)
+add_subdirectory(StyleTransferApp)

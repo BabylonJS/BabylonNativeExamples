@@ -6,8 +6,6 @@ set(SCRIPTS
     "Scripts/index.js")
 
 set(SOURCES
-    "Win32/RenderDoc.h"
-    "Win32/RenderDoc.cpp"
     "Win32/SystemTime.h"
     "Win32/SystemTime.cpp"
     "Win32/Utility.h"
@@ -35,7 +33,6 @@ target_compile_options(StyleTransferApp PRIVATE /await)
 target_link_to_dependencies(StyleTransferApp
     PRIVATE AppRuntime
     PRIVATE Console
-    PRIVATE DirectXTK
     PRIVATE ExternalTexture
     PRIVATE NativeEngine
     PRIVATE NativeInput
