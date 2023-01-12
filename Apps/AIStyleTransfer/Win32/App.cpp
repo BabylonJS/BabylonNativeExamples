@@ -10,6 +10,7 @@
 #include <Babylon/Polyfills/Canvas.h>
 
 #include <winrt/base.h>
+#include <winrt/Windows.Storage.h>
 #include <winrt/Windows.AI.MachineLearning.h>
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Graphics.Imaging.h>
@@ -17,7 +18,12 @@
 #include <winrt/Windows.Storage.h>
 #include <winrt/Windows.Graphics.DirectX.Direct3D11.h>
 #include <Windows.graphics.directx.direct3d11.interop.h>
+#include <winrt/Windows.Storage.Streams.h>
+#include <winrt/Windows.Web.Http.h>
+#include <winrt/Windows.ApplicationModel.h>
+#include <winrt/Windows.Foundation.Collections.h>
 
+#include <PathCch.h>
 #include <Windows.h>
 #include <Windowsx.h>
 #include <Shlwapi.h>
@@ -25,6 +31,7 @@
 #include <stdio.h>
 #include <wrl.h>
 #include <dxgi1_2.h>
+#include <filesystem>
 
 #include "resource.h"
 
@@ -50,10 +57,17 @@ namespace
 	constexpr const uint32_t WIDTH = 720;
 	constexpr const uint32_t HEIGHT = 720;
 
-	winrt::hstring modelPath = L"G:\\Development\\Github\\Windows-Machine-Learning\\Samples\\StyleTransfer\\Assets\\mosaic.onnx";
+	const std::vector<winrt::hstring> g_models = {
+		L"\\Models\\candy.onnx", 
+		L"\\Models\\la_muse.onnx", 
+		L"\\Models\\mosaic.onnx", 
+		L"\\Models\\udnie.onnx"
+	};
 
-	LearningModelSession session = nullptr;
-	LearningModelBinding binding = nullptr;
+	std::vector<LearningModelSession> g_sessions{};
+	std::vector<LearningModelBinding> g_bindings{};
+
+	int g_selectedModel = 0;
 
 	// Global Variables:
 	HINSTANCE hInst;                     // current instance
@@ -71,8 +85,6 @@ namespace
 	winrt::com_ptr<ID3D11Device>		g_d3dDevice = nullptr;
 	winrt::com_ptr<ID3D11DeviceContext> g_d3dContext = nullptr;
 	winrt::com_ptr<ID3D11Texture2D>		g_renderTexture = nullptr;
-
-	bool USE_STYLE_TRANSFER = true;
 
 	std::filesystem::path GetModulePath()
 	{
@@ -138,74 +150,40 @@ namespace
 		return device;
 	}
 
-	// Machine learning
-	LearningModel LoadModel(winrt::hstring  modelPath)
+	winrt::hstring GetInstalledLocation()
 	{
+		WCHAR modulePath[ 4096 ];
+		DWORD result { ::GetModuleFileNameW( nullptr, modulePath, ARRAYSIZE(modulePath))};
+		winrt::check_bool( result != 0 && result != std::size( modulePath ) );
+		winrt::check_hresult(PathCchRemoveFileSpec(modulePath, ARRAYSIZE( modulePath)));
+		return modulePath;
+	}
+
+	// Machine learning
+	LearningModel LoadModel(winrt::hstring modelPath)
+	{
+		auto installPath = GetInstalledLocation();
+		auto finalPath = installPath + modelPath;
+
 		// load the model
-		printf("Loading modelfile '%ws'\n", modelPath.c_str());
+		Utility::Printf( "Loading modelfile '%ws'\n", finalPath.c_str() );
+
 		auto ticks = SystemTime::GetCurrentTick();
-		auto model = LearningModel::LoadFromFilePath(modelPath);
+		auto model = LearningModel::LoadFromFilePath( finalPath.c_str());
 		ticks = SystemTime::GetCurrentTick() - ticks;
-		printf("model file loaded in %f ms\n", SystemTime::TicksToMillisecs(ticks));
-
-		// Debugging logic to see the input and output of ther model and retrieve dimensions of input/output variables
-		// ### DEBUG ###
-		static std::vector<std::string> kind_values{ "Tensor", "Sequence", "Map", "Image" };
-
-		static std::map<int, std::string> channel_values{
-			{0,   "Unknown"},
-			{12,  "Rgba16"},
-			{30,  "Rgba8"},
-			{57,  "Gray16"},
-			{62,  "Gray8"},
-			{87,  "Bgra8"},
-			{103, "Nv12"},
-			{104, "P010"},
-			{107, "Yuy2"}
-		};
-
-		for (auto inputF : model.InputFeatures())
-		{
-			auto kind = static_cast<int>(inputF.Kind());
-			auto name = inputF.Name();
-
-			printf("input | kind:'%s', name:'%ws' \n", kind_values[kind].c_str(), name.c_str());
-
-			IImageFeatureDescriptor imgDesc = inputF.try_as<IImageFeatureDescriptor>();
-			ITensorFeatureDescriptor tfDesc = inputF.try_as<ITensorFeatureDescriptor>();
-
-			auto n = (int)(imgDesc == nullptr ? tfDesc.Shape().GetAt(0) : 1);
-			auto width = (int)(imgDesc == nullptr ? tfDesc.Shape().GetAt(3) : imgDesc.Width());
-			auto height = (int)(imgDesc == nullptr ? tfDesc.Shape().GetAt(2) : imgDesc.Height());
-			auto channel = (imgDesc == nullptr ? tfDesc.Shape().GetAt(1) : static_cast<int>(imgDesc.BitmapPixelFormat()));
-
-			printf("N: %i, Width:%i, Height:%i, Channel: '%s' \n", n, width, height, channel_values[channel].c_str());
-		}
-
-		for (auto outputF : model.OutputFeatures())
-		{
-			auto kind = static_cast<int>(outputF.Kind());
-			auto name = outputF.Name();
-
-			printf("output | kind:'%s', name:'%ws' \n", kind_values[kind].c_str(), name.c_str());
-
-			IImageFeatureDescriptor imgDesc = outputF.try_as<IImageFeatureDescriptor>();
-			ITensorFeatureDescriptor tfDesc = outputF.try_as<ITensorFeatureDescriptor>();
-
-			auto n = (int)(imgDesc == nullptr ? tfDesc.Shape().GetAt(0) : 1);
-			auto width = (int)(imgDesc == nullptr ? tfDesc.Shape().GetAt(3) : imgDesc.Width());
-			auto height = (int)(imgDesc == nullptr ? tfDesc.Shape().GetAt(2) : imgDesc.Height());
-			auto channel = (imgDesc == nullptr ? tfDesc.Shape().GetAt(1) : static_cast<int>(imgDesc.BitmapPixelFormat()));
-
-			printf("N: %i, Width:%i, Height:%i, Channel: '%s' \n", n, width, height, channel_values[channel].c_str());
-		}
+		Utility::Printf("model file loaded in %f ms\n", SystemTime::TicksToMillisecs(ticks));
 
 		return model;
 	}
 
-	LearningModelSession CreateModelSession(LearningModel model)
+	LearningModelDevice CreateLearnDevice()
 	{
-		return LearningModelSession(model, LearningModelDevice(LearningModelDeviceKind::DirectXHighPerformance));
+		return LearningModelDevice(LearningModelDeviceKind::DirectXHighPerformance);
+	}
+
+	LearningModelSession CreateModelSession(LearningModel model, LearningModelDevice device)
+	{
+		return LearningModelSession(model, device);
 	}
 
 	LearningModelBinding BindMLModel(LearningModelSession session)
@@ -216,7 +194,7 @@ namespace
 		auto outputFrame = VideoFrame::CreateAsDirect3D11SurfaceBacked(DirectXPixelFormat::B8G8R8A8UIntNormalized, WIDTH, HEIGHT, session.Device().Direct3D11Device());
 
 		// now create a session and binding
-		binding = LearningModelBinding{ session };
+		auto binding = LearningModelBinding{ session };
 		binding.Bind(L"outputImage", outputFrame);
 
 		ticks = SystemTime::GetCurrentTick() - ticks;
@@ -338,19 +316,25 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
 	SystemTime::Initialize();
 
-	//Machien Learning initalization
-	LearningModel model = LoadModel(modelPath);
-	auto session = CreateModelSession(model);
+	auto learnDevice = CreateLearnDevice();
 
-	InitializeGraphicsInfra(hWnd, session.Device().Direct3D11Device());
+	InitializeGraphicsInfra(hWnd, learnDevice.Direct3D11Device());
 
 	// Create the Babylon Native graphics device and update.
-	g_device = CreateGraphicsDevice(g_d3dDevice.get());
-	update = std::make_unique<Babylon::Graphics::DeviceUpdate>(g_device->GetUpdate("update"));
+	g_device = CreateGraphicsDevice( g_d3dDevice.get() );
+	update = std::make_unique<Babylon::Graphics::DeviceUpdate>( g_device->GetUpdate( "update" ) );
 
-	auto inputFrame = VideoFrame::CreateAsDirect3D11SurfaceBacked(DirectXPixelFormat::B8G8R8A8UIntNormalized, WIDTH, HEIGHT, session.Device().Direct3D11Device());
+	auto inputFrame = VideoFrame::CreateAsDirect3D11SurfaceBacked( DirectXPixelFormat::B8G8R8A8UIntNormalized, WIDTH, HEIGHT, learnDevice.Direct3D11Device() );
 
-	auto binding = BindMLModel(session);
+	//Machien Learning initalization
+	for( size_t i = 0; i < g_models.size(); i++ )
+	{
+		LearningModel model = LoadModel(g_models[ i ]);
+		auto session = CreateModelSession( model, learnDevice );
+		auto binding = BindMLModel(session);
+		g_sessions.push_back(session);
+		g_bindings.push_back(binding);
+	}
 
 	// Start rendering a frame to unblock the JavaScript from queuing graphics
 	// commands.
@@ -456,10 +440,10 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
 				Utility::Printf("FPS %f \n", fps);
 
-				if (USE_STYLE_TRANSFER)
+				if (g_selectedModel >= 0)
 				{
 					CopyTo(g_renderTexture.get(), inputFrame);
-					VideoFrame result = RunModel(session, binding, inputFrame);
+					VideoFrame result = RunModel(g_sessions[g_selectedModel], g_bindings[g_selectedModel], inputFrame);
 					CopyTo(result, g_renderTexture.get());
 				}
 
@@ -569,7 +553,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 	{
 		if (wParam == 'R')
 		{
-			USE_STYLE_TRANSFER = !USE_STYLE_TRANSFER;
+			g_selectedModel = g_selectedModel < 3 ? ( g_selectedModel + 1):  -1;
 		}
 		break;
 	}
