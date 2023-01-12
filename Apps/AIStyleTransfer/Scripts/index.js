@@ -34,16 +34,15 @@ function startup(nativeTexture, width, height) {
 
     // Create a default camera that looks at the asset from a specific angle
     // and outputs to the render target created in `startup` above.
-    scene.createDefaultCamera(true, true);
+    scene.createDefaultCamera(true, true, true);
     scene.createDefaultLight(true);
     scene.activeCamera.alpha = 2;
     scene.activeCamera.beta = 1.25;
     scene.activeCamera.outputRenderTarget = outputTexture;
 
-    var cube = BABYLON.Mesh.CreateBox("box1", 0.2, scene);
+    BABYLON.SceneLoader.AppendAsync("https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/FlightHelmet/glTF/FlightHelmet.gltf");
 
     engine.runRenderLoop(function () {
-        cube.rotate(BABYLON.Vector3.Up(), 0.01);
         scene.render();
     });
 }
