@@ -35,9 +35,6 @@
 
 #include "resource.h"
 
-#include "Utility.h"
-#include "SystemTime.h"
-
 using namespace winrt::Windows::AI::MachineLearning;
 using namespace winrt::Windows::Foundation::Collections;
 using namespace winrt::Windows::Graphics::Imaging;
@@ -50,6 +47,8 @@ using namespace Microsoft::WRL;
 using namespace Windows::Graphics::DirectX::Direct3D11;
 
 #define MAX_LOADSTRING 100
+
+LRESULT CALLBACK WndProc( HWND, UINT, WPARAM, LPARAM );
 
 namespace
 {
@@ -64,9 +63,6 @@ namespace
 		L"\\Models\\udnie.onnx"
 	};
 
-	std::vector<LearningModelSession> g_sessions{};
-	std::vector<LearningModelBinding> g_bindings{};
-
 	int g_selectedModel = 0;
 
 	// Global Variables:
@@ -80,11 +76,8 @@ namespace
 	std::unique_ptr<Babylon::AppRuntime> runtime{};
 	std::unique_ptr<Babylon::Polyfills::Canvas> nativeCanvas{};
 	bool minimized{ false };
-
-	winrt::com_ptr<IDXGISwapChain1>		g_SwapChain = nullptr;
-	winrt::com_ptr<ID3D11Device>		g_d3dDevice = nullptr;
-	winrt::com_ptr<ID3D11DeviceContext> g_d3dContext = nullptr;
-	winrt::com_ptr<ID3D11Texture2D>		g_renderTexture = nullptr;
+	
+	winrt::com_ptr<ID3D11Texture2D>		g_BabylonRenderTexture = nullptr;
 
 	std::filesystem::path GetModulePath()
 	{
@@ -94,7 +87,53 @@ namespace
 		return std::filesystem::path{ modulePath }.parent_path();
 	}
 
-	void InitializeGraphicsInfra(HWND g_coreWindow, IDirect3DDevice device)
+	HWND CreateAndShowWindow(HINSTANCE hInstance, int nCmdShow )
+	{
+		// Initialize global strings
+		LoadStringW( hInstance, IDS_APP_TITLE, szTitle, MAX_LOADSTRING );
+		LoadStringW( hInstance, IDC_PLAYGROUNDWIN32, szWindowClass, MAX_LOADSTRING );
+
+		WNDCLASSEXW wcex;
+
+		wcex.cbSize = sizeof( WNDCLASSEX );
+
+		wcex.style = CS_HREDRAW | CS_VREDRAW;
+		wcex.lpfnWndProc = WndProc;
+		wcex.cbClsExtra = 0;
+		wcex.cbWndExtra = 0;
+		wcex.hInstance = hInstance;
+		wcex.hIcon = LoadIcon( hInstance, MAKEINTRESOURCE( IDI_PLAYGROUNDWIN32 ) );
+		wcex.hCursor = LoadCursor( nullptr, IDC_ARROW );
+		wcex.hbrBackground = ( HBRUSH ) ( COLOR_WINDOW + 1 );
+		wcex.lpszMenuName = MAKEINTRESOURCEW( IDC_PLAYGROUNDWIN32 );
+		wcex.lpszClassName = szWindowClass;
+		wcex.hIconSm = LoadIcon( wcex.hInstance, MAKEINTRESOURCE( IDI_SMALL ) );
+
+		RegisterClassExW( &wcex );
+
+		RECT rc = { 0, 0, WIDTH, HEIGHT };
+		AdjustWindowRect( &rc, WS_OVERLAPPEDWINDOW, FALSE );
+
+		HWND hWnd = CreateWindowW( szWindowClass, szTitle, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, rc.right - rc.left, rc.bottom - rc.top, nullptr, nullptr, hInstance, nullptr );
+
+		if(!hWnd)
+		{
+			return FALSE;
+		}
+
+		ShowWindow( hWnd, nCmdShow );
+		UpdateWindow( hWnd );
+		EnableMouseInPointer( true );
+
+		return hWnd;
+	}
+
+	//Creates D3D11 graphics objects from the IDirect3DDevice device created by WindowsML.
+	void InitializeGraphicsInfra(_In_ HWND								     window, 
+								 _In_ IDirect3DDevice				         device, 
+								 _Out_ winrt::com_ptr<IDXGISwapChain1>&      g_SwapChain,
+								 _Out_ winrt::com_ptr<ID3D11Device>&         g_d3dDevice, 
+								 _Out_ winrt::com_ptr<ID3D11DeviceContext>&  g_d3dContext )
 	{
 		winrt::com_ptr<IDirect3DDxgiInterfaceAccess> dxgiInterfaceAccess{ device.as<IDirect3DDxgiInterfaceAccess>() };
 		winrt::com_ptr<IDXGIDevice2> dxgiDevice1;
@@ -105,44 +144,37 @@ namespace
 
 		g_d3dDevice->GetImmediateContext(g_d3dContext.put());
 
-		// Allocate a descriptor.
 		DXGI_SWAP_CHAIN_DESC1 swapChainDesc = { 0 };
 		swapChainDesc.Width = WIDTH;                           // use automatic sizing
 		swapChainDesc.Height = HEIGHT;
 		swapChainDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM; // this is the most common swapchain format
 		swapChainDesc.Stereo = false;
-
-		// Use 4X MSAA? --must match swap chain MSAA values.
 		swapChainDesc.SampleDesc.Count = 1;
 		swapChainDesc.SampleDesc.Quality = 0;
-
 		swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT | DXGI_USAGE_SHADER_INPUT | DXGI_USAGE_UNORDERED_ACCESS;
 		swapChainDesc.BufferCount = 2; // use double buffering to enable flip
 		swapChainDesc.Scaling = DXGI_SCALING_NONE;
 		swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL; // all apps must use this SwapEffect
 		swapChainDesc.Flags = 0;
 
-		// Identify the physical adapter (GPU or card) this device is runs on.
 		winrt::com_ptr<IDXGIAdapter> dxgiAdapter;
-		ASSERT_SUCCEEDED(dxgiDevice1->GetAdapter(dxgiAdapter.put()));
+		winrt::check_hresult(dxgiDevice1->GetAdapter(dxgiAdapter.put()));
 
-		// Get the factory object that created the DXGI device.
 		winrt::com_ptr<IDXGIFactory2> dxgiFactory;
-		ASSERT_SUCCEEDED(dxgiAdapter->GetParent(IID_PPV_ARGS(&dxgiFactory)));
+		winrt::check_hresult(dxgiAdapter->GetParent(IID_PPV_ARGS(&dxgiFactory)));
 
-		// Get the final swap chain for this window from the DXGI factory.
-		ASSERT_SUCCEEDED(dxgiFactory->CreateSwapChainForHwnd(g_d3dDevice.get(), g_coreWindow, &swapChainDesc, nullptr, nullptr, g_SwapChain.put()));
+		winrt::check_hresult(dxgiFactory->CreateSwapChainForHwnd(g_d3dDevice.get(), window, &swapChainDesc, nullptr, nullptr, g_SwapChain.put()));
 
-		// Ensure that DXGI doesn't queue more than one frame at a time.
-		ASSERT_SUCCEEDED(dxgiDevice1->SetMaximumFrameLatency(1));
+		winrt::check_hresult(dxgiDevice1->SetMaximumFrameLatency(1));
 
 		Microsoft::WRL::ComPtr<IDXGISurface1> dxgiBuffer;
-		ASSERT_SUCCEEDED(g_SwapChain->GetBuffer(0, __uuidof(IDXGISurface1), &dxgiBuffer));
+		winrt::check_hresult(g_SwapChain->GetBuffer(0, __uuidof(IDXGISurface1), &dxgiBuffer));
 
-		ASSERT_SUCCEEDED(dxgiBuffer->QueryInterface(__uuidof(ID3D11Texture2D), g_renderTexture.put_void()));
+		winrt::check_hresult(dxgiBuffer->QueryInterface(__uuidof(ID3D11Texture2D), g_BabylonRenderTexture.put_void()));
 	}
 
-	std::unique_ptr<Babylon::Graphics::Device> CreateGraphicsDevice(ID3D11Device* d3dDevice)
+	//Creates Babylon Native Graphics Device.
+	std::unique_ptr<Babylon::Graphics::Device> CreateBabylonGraphicsDevice(ID3D11Device* d3dDevice)
 	{
 		Babylon::Graphics::DeviceConfiguration config{ d3dDevice };
 		std::unique_ptr<Babylon::Graphics::Device> device = Babylon::Graphics::Device::Create(config);
@@ -159,64 +191,33 @@ namespace
 		return modulePath;
 	}
 
-	// Machine learning
-	LearningModel LoadModel(winrt::hstring modelPath)
+	// Creates a learning model session from a onnx file.
+	LearningModelSession CreateModelSession(winrt::hstring modelLocalPath, LearningModelDevice device )
 	{
-		auto installPath = GetInstalledLocation();
-		auto finalPath = installPath + modelPath;
-
-		// load the model
-		Utility::Printf( "Loading modelfile '%ws'\n", finalPath.c_str() );
-
-		auto ticks = SystemTime::GetCurrentTick();
-		auto model = LearningModel::LoadFromFilePath( finalPath.c_str());
-		ticks = SystemTime::GetCurrentTick() - ticks;
-		Utility::Printf("model file loaded in %f ms\n", SystemTime::TicksToMillisecs(ticks));
-
-		return model;
-	}
-
-	LearningModelDevice CreateLearnDevice()
-	{
-		return LearningModelDevice(LearningModelDeviceKind::DirectXHighPerformance);
-	}
-
-	LearningModelSession CreateModelSession(LearningModel model, LearningModelDevice device)
-	{
-		return LearningModelSession(model, device);
+		auto executablePath = GetInstalledLocation();
+		auto finalPath = executablePath + modelLocalPath;
+		auto model = LearningModel::LoadFromFilePath(finalPath.c_str());
+		return LearningModelSession( model, device );;
 	}
 
 	LearningModelBinding BindMLModel(LearningModelSession session)
 	{
-		Utility::Printf("Binding the model...\n");
-		auto ticks = SystemTime::GetCurrentTick();
-
 		auto outputFrame = VideoFrame::CreateAsDirect3D11SurfaceBacked(DirectXPixelFormat::B8G8R8A8UIntNormalized, WIDTH, HEIGHT, session.Device().Direct3D11Device());
-
+		
 		// now create a session and binding
 		auto binding = LearningModelBinding{ session };
 		binding.Bind(L"outputImage", outputFrame);
-
-		ticks = SystemTime::GetCurrentTick() - ticks;
-		Utility::Printf("Model bound in %f ms\n", SystemTime::TicksToMillisecs(ticks));
-
 		return binding;
 	}
 
 	VideoFrame RunModel(LearningModelSession session, LearningModelBinding binding, VideoFrame inputFrame)
 	{
-		// now run the model
-		auto ticks = SystemTime::GetCurrentTick();
-
-		// bind the intput image
+		// bind the input image
 		binding.Bind(L"inputImage", inputFrame);
-
+		
+		//Run model
 		auto results = session.Evaluate(binding, L"RunId");
-
 		VideoFrame evalOutput = results.Outputs().Lookup(L"outputImage").try_as<VideoFrame>();
-
-		ticks = SystemTime::GetCurrentTick() - ticks;
-		Utility::Printf("Model run took %f ms \n", SystemTime::TicksToMillisecs(ticks));
 		return evalOutput;
 	}
 
@@ -235,7 +236,7 @@ namespace
 		g_device.reset();
 	}
 
-	void CopyTo(VideoFrame src, VideoFrame dst)
+	void CopyTo(VideoFrame src, VideoFrame dst, winrt::com_ptr<ID3D11DeviceContext> d3d11Context)
 	{
 		auto srcD3DSurface = src.Direct3DSurface().as<IDirect3DDxgiInterfaceAccess>();
 		auto dstD3DSurface = dst.Direct3DSurface().as<IDirect3DDxgiInterfaceAccess>();
@@ -246,27 +247,25 @@ namespace
 		winrt::com_ptr<ID3D11Texture2D> dstTexture;
 		dstD3DSurface->GetInterface(IID_PPV_ARGS(&dstTexture));
 
-		g_d3dContext->CopyResource(dstTexture.get(), srcTexture.get());
+		d3d11Context->CopyResource(dstTexture.get(), srcTexture.get());
 	}
 
-	void CopyTo(ID3D11Texture2D* src, VideoFrame dst)
+	void CopyTo(ID3D11Texture2D* src, VideoFrame dst, winrt::com_ptr<ID3D11DeviceContext> d3d11Context )
 	{
 		winrt::com_ptr<ID3D11Texture2D> dstTexture;
 		dst.Direct3DSurface().as<IDirect3DDxgiInterfaceAccess>()->GetInterface(IID_PPV_ARGS(&dstTexture));
 
-		g_d3dContext->CopyResource(dstTexture.get(), src);
+		d3d11Context->CopyResource(dstTexture.get(), src);
 	}
 
-	void CopyTo(VideoFrame src, ID3D11Texture2D* dst)
+	void CopyTo(VideoFrame src, ID3D11Texture2D* dst, winrt::com_ptr<ID3D11DeviceContext> d3d11Context )
 	{
 		winrt::com_ptr<ID3D11Texture2D> srcTexture;
 		src.Direct3DSurface().as<IDirect3DDxgiInterfaceAccess>()->GetInterface(IID_PPV_ARGS(&srcTexture));
 
-		g_d3dContext->CopyResource(dst, srcTexture.get());
+		d3d11Context->CopyResource(dst, srcTexture.get());
 	}
 }
-
-LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
 
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 	_In_opt_ HINSTANCE hPrevInstance,
@@ -278,63 +277,37 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 	UNREFERENCED_PARAMETER(hPrevInstance);
 	UNREFERENCED_PARAMETER(lpCmdLine);
 
-	// Initialize global strings
-	LoadStringW(hInstance, IDS_APP_TITLE, szTitle, MAX_LOADSTRING);
-	LoadStringW(hInstance, IDC_PLAYGROUNDWIN32, szWindowClass, MAX_LOADSTRING);
+	//------------- WinML intialization ------------------
 
-	WNDCLASSEXW wcex;
+	std::vector<LearningModelSession> MLSessions{};
+	std::vector<LearningModelBinding> MLBindings{};
+	LearningModelDevice learnDevice = LearningModelDevice( LearningModelDeviceKind::DirectXHighPerformance );
+	VideoFrame inputFrame = VideoFrame::CreateAsDirect3D11SurfaceBacked( DirectXPixelFormat::B8G8R8A8UIntNormalized, WIDTH, HEIGHT, learnDevice.Direct3D11Device() );
 
-	wcex.cbSize = sizeof(WNDCLASSEX);
-
-	wcex.style = CS_HREDRAW | CS_VREDRAW;
-	wcex.lpfnWndProc = WndProc;
-	wcex.cbClsExtra = 0;
-	wcex.cbWndExtra = 0;
-	wcex.hInstance = hInstance;
-	wcex.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_PLAYGROUNDWIN32));
-	wcex.hCursor = LoadCursor(nullptr, IDC_ARROW);
-	wcex.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
-	wcex.lpszMenuName = MAKEINTRESOURCEW(IDC_PLAYGROUNDWIN32);
-	wcex.lpszClassName = szWindowClass;
-	wcex.hIconSm = LoadIcon(wcex.hInstance, MAKEINTRESOURCE(IDI_SMALL));
-
-	RegisterClassExW(&wcex);
-
-	RECT rc = { 0, 0, WIDTH, HEIGHT };
-	AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
-
-	HWND hWnd = CreateWindowW(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, rc.right - rc.left, rc.bottom - rc.top, nullptr, nullptr, hInstance, nullptr);
-
-	if (!hWnd)
+	for(size_t i = 0; i < g_models.size(); i++)
 	{
-		return FALSE;
+		LearningModelSession session = CreateModelSession( g_models[ i ], learnDevice );
+		auto binding = BindMLModel( session );
+		MLSessions.push_back( session );
+		MLBindings.push_back( binding );
 	}
 
-	ShowWindow(hWnd, nCmdShow);
-	UpdateWindow(hWnd);
-	EnableMouseInPointer(true);
+	//------------- D3D11 and application initialization ------------
 
-	SystemTime::Initialize();
+	winrt::com_ptr<IDXGISwapChain1>		swapChain = nullptr;
+	winrt::com_ptr<ID3D11Device>		d3d11Device = nullptr;
+	winrt::com_ptr<ID3D11DeviceContext> d3d11Context = nullptr;
 
-	auto learnDevice = CreateLearnDevice();
+	//Create and show application window.
+	HWND hWnd = CreateAndShowWindow( hInstance , nCmdShow );
 
-	InitializeGraphicsInfra(hWnd, learnDevice.Direct3D11Device());
+	//Create D3D11 objects.
+	InitializeGraphicsInfra(hWnd, learnDevice.Direct3D11Device(), swapChain, d3d11Device, d3d11Context );
 
-	// Create the Babylon Native graphics device and update.
-	g_device = CreateGraphicsDevice( g_d3dDevice.get() );
+	// --------------------- Babylon Native initialization --------------------------
+
+	g_device = CreateBabylonGraphicsDevice( d3d11Device.get() );
 	update = std::make_unique<Babylon::Graphics::DeviceUpdate>( g_device->GetUpdate( "update" ) );
-
-	auto inputFrame = VideoFrame::CreateAsDirect3D11SurfaceBacked( DirectXPixelFormat::B8G8R8A8UIntNormalized, WIDTH, HEIGHT, learnDevice.Direct3D11Device() );
-
-	//Machien Learning initalization
-	for( size_t i = 0; i < g_models.size(); i++ )
-	{
-		LearningModel model = LoadModel(g_models[ i ]);
-		auto session = CreateModelSession( model, learnDevice );
-		auto binding = BindMLModel(session);
-		g_sessions.push_back(session);
-		g_bindings.push_back(binding);
-	}
 
 	// Start rendering a frame to unblock the JavaScript from queuing graphics
 	// commands.
@@ -353,7 +326,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 			// Initialize the console polyfill.
 			Babylon::Polyfills::Console::Initialize(env, [](const char* message, auto)
 				{
-					Utility::Print(message);
+					OutputDebugStringA(message);
 				});
 
 			// Initialize the window, XMLHttpRequest, and NativeEngine polyfills.
@@ -377,7 +350,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
 	// Create an external texture for the render target texture and pass it to
 	// the `startup` JavaScript function.
-	loader.Dispatch([externalTexture = Babylon::Plugins::ExternalTexture{ g_renderTexture.get() }, &addToContext, &startup](Napi::Env env)
+	loader.Dispatch([externalTexture = Babylon::Plugins::ExternalTexture{ g_BabylonRenderTexture.get() }, &addToContext, &startup](Napi::Env env)
 	{
 		auto jsPromise = externalTexture.AddToContextAsync(env);
 		addToContext.set_value();
@@ -408,14 +381,15 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 	// Wait for `startup` to finish.
 	startup.get_future().wait();
 
+
+	// --------------------------- Rendering loop -------------------------
+
 	HACCEL hAccelTable = LoadAccelerators(hInstance, MAKEINTRESOURCE(IDC_PLAYGROUNDWIN32));
 
 	MSG msg{};
 
 	g_device->StartRenderingCurrentFrame();
 	update->Start();
-
-	auto previewsTick = SystemTime::GetCurrentTick();
 
 	// Main message loop:
 	while (msg.message != WM_QUIT)
@@ -430,24 +404,24 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 		{
 			if (g_device)
 			{
-				auto currentTick = SystemTime::GetCurrentTick();
-				auto deltaT = SystemTime::TicksToSeconds(currentTick - previewsTick);
-				auto fps = 1.0 / deltaT;
-				previewsTick = currentTick;
-
+				// Finish Babylon Native rendering.
 				update->Finish();
 				g_device->FinishRenderingCurrentFrame();
 
-				Utility::Printf("FPS %f \n", fps);
-
 				if (g_selectedModel >= 0)
 				{
-					CopyTo(g_renderTexture.get(), inputFrame);
-					VideoFrame result = RunModel(g_sessions[g_selectedModel], g_bindings[g_selectedModel], inputFrame);
-					CopyTo(result, g_renderTexture.get());
+					// Copy Babylon Native renderer to WinML input frame.
+					CopyTo(g_BabylonRenderTexture.get(), inputFrame, d3d11Context );
+					
+					// Run Style Transfer model.
+					VideoFrame result = RunModel(MLSessions[g_selectedModel], MLBindings[g_selectedModel], inputFrame);
+					
+					// Copy result back to Babylon Native render target.
+					CopyTo(result, g_BabylonRenderTexture.get(), d3d11Context );
 				}
 
-				ASSERT_SUCCEEDED(g_SwapChain->Present(1, 0));
+				// Present and start rendering next frame.
+				swapChain->Present( 1, 0 );
 				g_device->StartRenderingCurrentFrame();
 				update->Start();
 			}

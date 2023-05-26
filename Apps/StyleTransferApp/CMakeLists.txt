@@ -6,9 +6,6 @@ set(SCRIPTS
     "Scripts/index.js")
 
 set(SOURCES
-    "Win32/SystemTime.h"
-    "Win32/SystemTime.cpp"
-    "Win32/Utility.h"
     "Win32/App.cpp"
     
     "Win32/App.ico"
