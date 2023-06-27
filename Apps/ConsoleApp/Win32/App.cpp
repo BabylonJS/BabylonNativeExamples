@@ -58,12 +58,13 @@ namespace
         return texture;
     }
 
-    std::unique_ptr<Babylon::Graphics::Device> CreateGraphicsDevice(ID3D11Device* d3dDevice)
+    Babylon::Graphics::Device CreateGraphicsDevice(ID3D11Device* d3dDevice)
     {
-        Babylon::Graphics::DeviceConfiguration config{d3dDevice};
-        std::unique_ptr<Babylon::Graphics::Device> device = Babylon::Graphics::Device::Create(config);
-        device->UpdateSize(WIDTH, HEIGHT);
-        return device;
+        Babylon::Graphics::Configuration config{};
+        config.Device = d3dDevice;
+        config.Width = WIDTH;
+        config.Height = HEIGHT;
+        return {config};
     }
 }
 
@@ -81,24 +82,22 @@ int main()
 
     // Create the Babylon Native graphics device and update.
     auto device = CreateGraphicsDevice(d3dDevice.get());
-    auto deviceUpdate = std::make_unique<Babylon::Graphics::DeviceUpdate>(device->GetUpdate("update"));
+    auto deviceUpdate = device.GetUpdate("update");
 
     // Start rendering a frame to unblock the JavaScript from queuing graphics
     // commands.
-    device->StartRenderingCurrentFrame();
-    deviceUpdate->Start();
+    device.StartRenderingCurrentFrame();
+    deviceUpdate.Start();
 
     // Create a Babylon Native application runtime which hosts a JavaScript
     // engine on a new thread.
-    auto runtime = std::make_unique<Babylon::AppRuntime>();
-    runtime->Dispatch([&device](Napi::Env env)
-    {
+    Babylon::AppRuntime runtime{};
+    runtime.Dispatch([&device](Napi::Env env) {
         // Add the Babylon Native graphics device to the JavaScript environment.
-        device->AddToJavaScript(env);
+        device.AddToJavaScript(env);
 
         // Initialize the console polyfill.
-        Babylon::Polyfills::Console::Initialize(env, [](const char* message, auto)
-        {
+        Babylon::Polyfills::Console::Initialize(env, [](const char* message, auto) {
             std::cout << message;
         });
 
@@ -109,7 +108,7 @@ int main()
     });
 
     // Load the scripts for Babylon.js core and loaders plus this app's index.js.
-    Babylon::ScriptLoader loader{*runtime};
+    Babylon::ScriptLoader loader{runtime};
     loader.LoadScript("app:///Scripts/babylon.max.js");
     loader.LoadScript("app:///Scripts/babylonjs.loaders.js");
     loader.LoadScript("app:///Scripts/index.js");
@@ -122,33 +121,30 @@ int main()
 
     // Create an external texture for the render target texture and pass it to
     // the `startup` JavaScript function.
-    loader.Dispatch([externalTexture = Babylon::Plugins::ExternalTexture{outputTexture.get()}, &addToContext, &startup](Napi::Env env)
-    {
+    loader.Dispatch([externalTexture = Babylon::Plugins::ExternalTexture{outputTexture.get()}, &addToContext, &startup](Napi::Env env) {
         auto jsPromise = externalTexture.AddToContextAsync(env);
         addToContext.set_value();
 
-        jsPromise.Get("then").As<Napi::Function>().Call(jsPromise,
-        {
-            Napi::Function::New(env, [&startup](const Napi::CallbackInfo& info)
-            {
-                auto nativeTexture = info[0];
-                info.Env().Global().Get("startup").As<Napi::Function>().Call(
+        auto jsContinuation = Napi::Function::New(env, [&startup](const Napi::CallbackInfo& info) {
+            auto nativeTexture = info[0];
+            info.Env().Global().Get("startup").As<Napi::Function>().Call(
                 {
                     nativeTexture,
                     Napi::Value::From(info.Env(), WIDTH),
                     Napi::Value::From(info.Env(), HEIGHT),
                 });
-                startup.set_value();
-            })
+            startup.set_value();
         });
+
+        jsPromise.Get("then").As<Napi::Function>().Call(jsPromise, {jsContinuation});
     });
 
     // Wait for `AddToContextAsync` to be called.
     addToContext.get_future().wait();
 
     // Render a frame so that `AddToContextAsync` will complete.
-    deviceUpdate->Finish();
-    device->FinishRenderingCurrentFrame();
+    deviceUpdate.Finish();
+    device.FinishRenderingCurrentFrame();
 
     // Wait for `startup` to finish.
     startup.get_future().wait();
@@ -159,8 +155,7 @@ int main()
         const char* Url;
     };
 
-    std::array<Asset, 3> assets =
-    {
+    std::array<Asset, 3> assets = {
         Asset{"BoomBox", "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/BoomBox/glTF/BoomBox.gltf"},
         Asset{"GlamVelvetSofa", "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/GlamVelvetSofa/glTF/GlamVelvetSofa.gltf"},
         Asset{"MaterialsVariantsShoe", "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/MaterialsVariantsShoe/glTF/MaterialsVariantsShoe.gltf"},
@@ -172,35 +167,28 @@ int main()
         RenderDoc::StartFrameCapture(d3dDevice.get());
 
         // Start rendering a frame to unblock the JavaScript again.
-        device->StartRenderingCurrentFrame();
-        deviceUpdate->Start();
+        device.StartRenderingCurrentFrame();
+        deviceUpdate.Start();
 
         std::promise<void> loadAndRenderAsset{};
 
         // Call `loadAndRenderAssetAsync` with the asset URL.
-        loader.Dispatch([&loadAndRenderAsset, &asset](Napi::Env env)
-        {
+        loader.Dispatch([&loadAndRenderAsset, &asset](Napi::Env env) {
             std::cout << "Loading " << asset.Name << std::endl;
 
-            auto jsPromise = env.Global().Get("loadAndRenderAssetAsync").As<Napi::Function>().Call({
-                Napi::String::From(env, asset.Url)
-            }).As<Napi::Promise>();
-
-            jsPromise.Get("then").As<Napi::Function>().Call(jsPromise,
-            {
-                Napi::Function::New(env, [&loadAndRenderAsset](const Napi::CallbackInfo&)
-                {
-                    loadAndRenderAsset.set_value();
-                })
+            auto jsPromise = env.Global().Get("loadAndRenderAssetAsync").As<Napi::Function>().Call({Napi::String::From(env, asset.Url)}).As<Napi::Promise>();
+            auto jsContinuation = Napi::Function::New(env, [&loadAndRenderAsset](const Napi::CallbackInfo&) {
+                loadAndRenderAsset.set_value();
             });
+            jsPromise.Get("then").As<Napi::Function>().Call(jsPromise, {jsContinuation});
         });
 
         // Wait for the function to complete.
         loadAndRenderAsset.get_future().wait();
 
         // Finish rendering the frame.
-        deviceUpdate->Finish();
-        device->FinishRenderingCurrentFrame();
+        deviceUpdate.Finish();
+        device.FinishRenderingCurrentFrame();
 
         // Tell RenderDoc to stop capturing.
         RenderDoc::StopFrameCapture(d3dDevice.get());
@@ -213,11 +201,6 @@ int main()
         // See https://github.com/Microsoft/DirectXTK/wiki/ScreenGrab#srgb-vs-linear-color-space
         winrt::check_hresult(DirectX::SaveWICTextureToFile(d3dDeviceContext.get(), outputTexture.get(), GUID_ContainerFormatPng, filePath.c_str(), nullptr, nullptr, true));
     }
-
-    // Reset the application runtime, then graphics device update, then graphics device, in that order.
-    runtime.reset();
-    deviceUpdate.reset();
-    device.reset();
 
     return 0;
 }

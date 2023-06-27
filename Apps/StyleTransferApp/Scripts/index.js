@@ -4,7 +4,6 @@
 let engine = null;
 let scene = null;
 let outputTexture = null;
-let rootMesh = null;
 
 /**
  * Sets up the engine, scene, and output texture.
@@ -32,13 +31,18 @@ function startup(nativeTexture, width, height) {
         }
     );
 
-    // Create a default camera that looks at the asset from a specific angle
-    // and outputs to the render target created in `startup` above.
-    scene.createDefaultCamera(true, true, true);
     scene.createDefaultLight(true);
-    scene.activeCamera.alpha = 2;
-    scene.activeCamera.beta = 1.25;
-    scene.activeCamera.outputRenderTarget = outputTexture;
+
+    // Create a camera that looks at the asset from a specific angle
+    // and outputs to the render target created in `startup` above.
+    const camera = new BABYLON.ArcRotateCamera("camera", 2, 1.25, 2, new BABYLON.Vector3(0, 0.2, 0), scene);
+    camera.lowerRadiusLimit = 0.5;
+    camera.wheelPrecision = 50;
+    camera.minZ = 0.02;
+    camera.maxZ = 2000;
+    camera.speed = 0.4;
+    camera.outputRenderTarget = outputTexture;
+    camera.attachControl();
 
     BABYLON.SceneLoader.AppendAsync("https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/FlightHelmet/glTF/FlightHelmet.gltf");
 

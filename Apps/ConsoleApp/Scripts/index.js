@@ -1,5 +1,5 @@
-/// <reference path="../node_modules/babylonjs/babylon.module.d.ts" />
-/// <reference path="../node_modules/babylonjs-loaders/babylonjs.loaders.module.d.ts" />
+/// <reference path="../../node_modules/babylonjs/babylon.module.d.ts" />
+/// <reference path="../../node_modules/babylonjs-loaders/babylonjs.loaders.module.d.ts" />
 
 let engine = null;
 let scene = null;
