@@ -12,12 +12,11 @@ set(SOURCES
 
 add_executable(ConsoleApp ${BABYLON_SCRIPTS} ${SCRIPTS} ${SOURCES})
 
-target_compile_definitions(ConsoleApp PRIVATE UNICODE)
-target_compile_definitions(ConsoleApp PRIVATE _UNICODE)
+target_compile_definitions(ConsoleApp
+    PRIVATE UNICODE
+    PRIVATE _UNICODE)
 
-target_compile_options(ConsoleApp PRIVATE /await)
-
-target_link_to_dependencies(ConsoleApp
+target_link_libraries(ConsoleApp
     PRIVATE AppRuntime
     PRIVATE Console
     PRIVATE DirectXTK

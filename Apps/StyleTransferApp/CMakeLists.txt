@@ -24,12 +24,11 @@ set(SOURCES
 
 add_executable(StyleTransferApp WIN32 ${BABYLON_SCRIPTS} ${SCRIPTS} ${MODELS} ${SOURCES})
 
-target_compile_definitions(StyleTransferApp PRIVATE UNICODE)
-target_compile_definitions(StyleTransferApp PRIVATE _UNICODE)
+target_compile_definitions(StyleTransferApp
+    PRIVATE UNICODE
+    PRIVATE _UNICODE)
 
-target_compile_options(StyleTransferApp PRIVATE /await)
-
-target_link_to_dependencies(StyleTransferApp
+target_link_libraries(StyleTransferApp
     PRIVATE AppRuntime
     PRIVATE Console
     PRIVATE ExternalTexture
