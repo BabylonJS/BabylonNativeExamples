@@ -1,5 +1,4 @@
 set(BABYLON_NATIVE_BUILD_APPS OFF)
-#set(NAPI_JAVASCRIPT_ENGINE V8)
 add_subdirectory(BabylonNative)
 
 set(BUILD_TESTING OFF)
