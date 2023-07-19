@@ -22,17 +22,20 @@ function startup(nativeTexture, width, height) {
 
     // Wrap the input native texture in a render target texture for the output
     // render target of the camera used in `loadAndRenderAssetAsync` below.
+    // Note that the properties (width, height, samples, etc.) must match the
+    // native texture created in `App.cpp`.
     outputTexture = new BABYLON.RenderTargetTexture(
         "outputTexture",
         {
             width: width,
-            height: height
+            height: height,
         },
         scene,
         {
             colorAttachment: engine.wrapNativeTexture(nativeTexture),
             generateDepthBuffer: true,
-            generateStencilBuffer: true
+            generateStencilBuffer: true,
+            samples: 4,
         }
     );
 }
