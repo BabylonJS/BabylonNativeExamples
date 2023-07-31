@@ -60,6 +60,11 @@ async function loadAndRenderAssetAsync(url) {
     scene.activeCamera.beta = 1.25;
     scene.activeCamera.outputRenderTarget = outputTexture;
 
+    // Add ACES tone mapping.
+    const pipeline = new BABYLON.DefaultRenderingPipeline("acesToneMapping", true, scene, [scene.activeCamera]);
+    pipeline.imageProcessing.toneMappingEnabled = true;
+    pipeline.imageProcessing.toneMappingType = BABYLON.ImageProcessingConfiguration.TONEMAPPING_ACES;
+
     // Wait until the scene is ready before rendering the frame.
     await scene.whenReadyAsync();
 
