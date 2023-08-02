@@ -15,7 +15,7 @@ function startup(nativeTexture, width, height) {
 
     // Create a scene with a white background.
     scene = new BABYLON.Scene(engine);
-    scene.clearColor = BABYLON.Color3.White();
+    scene.clearColor.set(1, 1, 1, 1);
 
     // Create an environment so that reflections look good.
     scene.createDefaultEnvironment({ createSkybox: false, createGround: false });
@@ -60,10 +60,9 @@ async function loadAndRenderAssetAsync(url) {
     scene.activeCamera.beta = 1.25;
     scene.activeCamera.outputRenderTarget = outputTexture;
 
-    // Add ACES tone mapping.
-    const pipeline = new BABYLON.DefaultRenderingPipeline("acesToneMapping", true, scene, [scene.activeCamera]);
-    pipeline.imageProcessing.toneMappingEnabled = true;
-    pipeline.imageProcessing.toneMappingType = BABYLON.ImageProcessingConfiguration.TONEMAPPING_ACES;
+    // Enable ACES tone mapping in image processing configuration.
+    scene.imageProcessingConfiguration.toneMappingEnabled = true;
+    scene.imageProcessingConfiguration.toneMappingType = BABYLON.ImageProcessingConfiguration.TONEMAPPING_ACES;
 
     // Wait until the scene is ready before rendering the frame.
     await scene.whenReadyAsync();
