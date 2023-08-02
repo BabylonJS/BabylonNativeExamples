@@ -47,7 +47,7 @@ namespace
         desc.MipLevels = 1;
         desc.ArraySize = 1;
         desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-        desc.SampleDesc = {1, 0};
+        desc.SampleDesc = {4, 0};
         desc.Usage = D3D11_USAGE_DEFAULT;
         desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
         desc.CPUAccessFlags = 0;
@@ -65,6 +65,17 @@ namespace
         config.Width = WIDTH;
         config.Height = HEIGHT;
         return {config};
+    }
+
+    void CatchAndLogError(Napi::Promise jsPromise)
+    {
+        auto jsOnRejected = Napi::Function::New(jsPromise.Env(), [](const Napi::CallbackInfo& info) {
+            auto console = info.Env().Global().Get("console").As<Napi::Object>();
+            console.Get("error").As<Napi::Function>().Call(console, {info[0]});
+            std::exit(1);
+        });
+
+        jsPromise.Get("catch").As<Napi::Function>().Call(jsPromise, {jsOnRejected});
     }
 }
 
@@ -125,7 +136,7 @@ int main()
         auto jsPromise = externalTexture.AddToContextAsync(env);
         addToContext.set_value();
 
-        auto jsContinuation = Napi::Function::New(env, [&startup](const Napi::CallbackInfo& info) {
+        auto jsOnFulfilled = Napi::Function::New(env, [&startup](const Napi::CallbackInfo& info) {
             auto nativeTexture = info[0];
             info.Env().Global().Get("startup").As<Napi::Function>().Call(
                 {
@@ -136,7 +147,9 @@ int main()
             startup.set_value();
         });
 
-        jsPromise.Get("then").As<Napi::Function>().Call(jsPromise, {jsContinuation});
+        jsPromise = jsPromise.Get("then").As<Napi::Function>().Call(jsPromise, {jsOnFulfilled}).As<Napi::Promise>();
+
+        CatchAndLogError(jsPromise);
     });
 
     // Wait for `AddToContextAsync` to be called.
@@ -177,10 +190,14 @@ int main()
             std::cout << "Loading " << asset.Name << std::endl;
 
             auto jsPromise = env.Global().Get("loadAndRenderAssetAsync").As<Napi::Function>().Call({Napi::String::From(env, asset.Url)}).As<Napi::Promise>();
-            auto jsContinuation = Napi::Function::New(env, [&loadAndRenderAsset](const Napi::CallbackInfo&) {
+
+            auto jsOnFulfilled = Napi::Function::New(env, [&loadAndRenderAsset](const Napi::CallbackInfo&) {
                 loadAndRenderAsset.set_value();
             });
-            jsPromise.Get("then").As<Napi::Function>().Call(jsPromise, {jsContinuation});
+
+            jsPromise = jsPromise.Get("then").As<Napi::Function>().Call(jsPromise, {jsOnFulfilled}).As<Napi::Promise>();
+
+            CatchAndLogError(jsPromise);
         });
 
         // Wait for the function to complete.

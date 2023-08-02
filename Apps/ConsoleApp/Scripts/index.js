@@ -15,24 +15,27 @@ function startup(nativeTexture, width, height) {
 
     // Create a scene with a white background.
     scene = new BABYLON.Scene(engine);
-    scene.clearColor = BABYLON.Color3.White();
+    scene.clearColor.set(1, 1, 1, 1);
 
     // Create an environment so that reflections look good.
     scene.createDefaultEnvironment({ createSkybox: false, createGround: false });
 
     // Wrap the input native texture in a render target texture for the output
     // render target of the camera used in `loadAndRenderAssetAsync` below.
+    // Note that the properties (width, height, samples, etc.) must match the
+    // native texture created in `App.cpp`.
     outputTexture = new BABYLON.RenderTargetTexture(
         "outputTexture",
         {
             width: width,
-            height: height
+            height: height,
         },
         scene,
         {
             colorAttachment: engine.wrapNativeTexture(nativeTexture),
             generateDepthBuffer: true,
-            generateStencilBuffer: true
+            generateStencilBuffer: true,
+            samples: 4,
         }
     );
 }
@@ -56,6 +59,10 @@ async function loadAndRenderAssetAsync(url) {
     scene.activeCamera.alpha = 2;
     scene.activeCamera.beta = 1.25;
     scene.activeCamera.outputRenderTarget = outputTexture;
+
+    // Enable ACES tone mapping in image processing configuration.
+    scene.imageProcessingConfiguration.toneMappingEnabled = true;
+    scene.imageProcessingConfiguration.toneMappingType = BABYLON.ImageProcessingConfiguration.TONEMAPPING_ACES;
 
     // Wait until the scene is ready before rendering the frame.
     await scene.whenReadyAsync();
