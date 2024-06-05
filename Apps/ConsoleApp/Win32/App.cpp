@@ -64,7 +64,7 @@ namespace
         config.Device = d3dDevice;
         config.Width = WIDTH;
         config.Height = HEIGHT;
-        return {config};
+        return Babylon::Graphics::Device(config);
     }
 
     void CatchAndLogError(Napi::Promise jsPromise)
