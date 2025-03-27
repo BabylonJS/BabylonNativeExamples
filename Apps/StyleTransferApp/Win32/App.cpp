@@ -167,13 +167,13 @@ namespace
     }
 
     // Creates Babylon Native Graphics Device.
-    Babylon::Graphics::Device CreateBabylonGraphicsDevice(ID3D11Device* d3dDevice)
+    std::optional<Babylon::Graphics::Device> CreateBabylonGraphicsDevice(ID3D11Device* d3dDevice)
     {
         Babylon::Graphics::Configuration config{};
         config.Device = d3dDevice;
         config.Width = WIDTH;
         config.Height = HEIGHT;
-        return {config};
+        return std::make_optional<Babylon::Graphics::Device>(config);
     }
 
     winrt::hstring GetInstalledLocation()
@@ -299,7 +299,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
     // --------------------- Babylon Native initialization --------------------------
 
-    g_device.emplace(CreateBabylonGraphicsDevice(d3d11Device.get()));
+    g_device = CreateBabylonGraphicsDevice(d3d11Device.get());
     g_update.emplace(g_device->GetUpdate("update"));
 
     // Start rendering a frame to unblock the JavaScript from queuing graphics
